@@ -50,6 +50,7 @@ class ParseArgs:
         arg_list = vars(self.arguments)
         ConfigObjType = arg_list.pop('obj_class')
         config_obj_handle = ConfigObjType(api_server=arg_list.pop('api_server_host'), tenant=arg_list.pop('tenant_name'))
+        pdb.set_trace()
         config_obj_oper = getattr(config_obj_handle,arg_list.pop('obj_func'))
         config_obj_oper(**arg_list)
 
