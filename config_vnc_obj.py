@@ -26,23 +26,31 @@ class ConfigHandle(object):
             print "Error: connecting to the API server, check the API Server IP"
             sys.exit(1)
 
-    def fqn_to_string(self,fq_name):
-        return ':'.join(fq_name)
-
-    def string_to_fqn(self,name):
-        return name.split(':')
-
-    def get_subnet(self):
-        return "100.64.{}.0/24".format(randint(1,254))
-
     def get_project(self,name=None):
         if not name:
             tenant = self.tenant
         fq_name = fq_name = ['default-domain', tenant]
         return self.vnc_handle.project_read(fq_name=fq_name)
 
-    def print_json(self,obj=None):
+    @staticmethod
+    def fqn_to_string(self,fq_name):
+        return ':'.join(fq_name)
+
+    @staticmethod
+    def string_to_fqn(self,name):
+        return name.split(':')
+
+    @staticmethod
+    def get_subnet():
+        return "100.64.{}.0/24".format(randint(1,254))
+    
+    @staticmethod
+    def print_json(obj=None):
          print json.dumps(obj, default = self.vnc_handle._obj_serializer_all,indent=4, separators=(',', ': '))
+    
+    @staticmethod
+    def shell_cmd(cmd):
+        return subprocess.check_output(cmd, shell = True)
 
 
 class ConfigVN(ConfigHandle):
@@ -136,22 +144,27 @@ class ConfigVM(ConfigHandle):
     def delete(self,name):
         fq_name = [ name ]
         try:
+            self.delete_vmis(name)
             self.vnc_handle.virtual_machine_delete(fq_name = fq_name)
             print "Deleted the virtual machine [{}]".format(self.fqn_to_string(fq_name))
         except vnc_exc.NoIdError:
             print "Virtual Machine  [{}] not found".format(self.fqn_to_string(fq_name))
             raise
 
-    def delete_vmis(self,name):
-        fq_name = [name]
+    def delete_vmis(self,name=None):
         vm_obj = self.read(name)
-        for p in vm_obj.virtual_machine_interface_back_ref:
+        for p in vm_obj.get_virtual_machine_interface_back_refs():
             vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
-            vmi_obj.del_virtual_machine(vm_obj)
-        
+            if vmi_obj.get_instance_ip_back_refs():
+                for p in vmi_obj.get_instance_ip_back_refs():
+                    iip_obj = self.vnc_handle.instance_ip_read(fq_name = p['to'])
+                    fq_name = iip_obj.get_fq_name()
+                    self.vnc_handle.instance_ip_delete(fq_name=fq_name)
+            fq_name = vmi_obj.get_fq_name()
+            self.vnc_handle.virtual_machine_interface_delete(fq_name=fq_name)
 
     def read(self,name):
-        fq_name = [ vm_name ]
+        fq_name = [ name ]
         try:
             return self.vnc_handle.virtual_machine_read(fq_name=fq_name)
         except vnc_exc.NoIdError:
@@ -168,20 +181,18 @@ class ConfigVMI(ConfigHandle):
         else: 
             super(ConfigVMI,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
 
-    def create(self,network,vm,address=None,sg=None,name='auto'):
+    def create(self,network,vm,name=None,address=None,sg=None):
         update = False
+        if not name:
+            name = str(uuid.uuid4())
         fq_name = [self.domain, self.tenant , name]
         try:
             self.vnc_handle.virtual_machine_interface_read(fq_name = fq_name)
             print "Virtual Machine Interface exists"
             return vm_obj.uuid
         except vnc_exc.NoIdError:
-            if name == 'auto':
-                id = str(uuid.uuid4())
-            else:
-                id = name
             proj_obj = self.get_project()
-            vmi_obj = vnc_api.VirtualMachineInterface(parent_obj=proj_obj)
+            vmi_obj = vnc_api.VirtualMachineInterface(name=name,parent_obj=proj_obj)
             self.add_network(vmi_obj,network)
             vmi_id = self.vnc_handle.virtual_machine_interface_create(vmi_obj)
             self.add_iip(vmi_obj,network)
@@ -195,11 +206,12 @@ class ConfigVMI(ConfigHandle):
                 raise
 
     def delete(self,name):
+        self.delete_iip(name)
         fq_name = [self.domain, self.tenant, name ]
         try:
             self.vnc_handle.virtual_machine_interface_delete(fq_name = fq_name)
             print "Deleted the Virtual Machine Interface [{}]".format(self.fqn_to_string(fq_name))
-        except vnc_exc.NoIdError:
+        except:
             print "Virtual Machine Interface [{}] not found".format(self.fqn_to_string(fq_name))
             raise
             
@@ -218,7 +230,7 @@ class ConfigVMI(ConfigHandle):
         vn_obj = self.vnc_handle.virtual_network_read( fq_name = vn_fq_name)
         id = str(uuid.uuid4())
         print id
-        iip_obj = vnc_api.InstanceIp()
+        iip_obj = vnc_api.InstanceIp(name=id)
         iip_obj.add_virtual_network(vn_obj)
         iip_obj.set_instance_ip_family('v4')
         iip_obj.add_virtual_machine_interface(obj)
@@ -231,3 +243,49 @@ class ConfigVMI(ConfigHandle):
         except vnc_exc.NoIdError:
             print "Error Virtual Machine  Interface [{}] not found".format(self.fqn_to_string(fq_name))
             raise
+
+    def delete_iip(self,name=None):
+        vmi_obj = self.read(name)
+        if vmi_obj.get_instance_ip_back_refs():
+            for p in vmi_obj.get_instance_ip_back_refs():
+                iip_obj = self.vnc_handle.instance_ip_read(fq_name = p['to'])
+                fq_name = iip_obj.get_fq_name()
+                self.vnc_handle.instance_ip_delete(fq_name=fq_name)
+        return
+
+    class ConfigCNI(ConfigHandle):
+        def __init__(self):
+        if self.vnc_handle:
+            pass
+        else: 
+            super(ConfigVMI,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
+        
+        def add_cni(self,name,vn_name):
+            cmd = 'docker inspect -f "{{.State.Pid}}" %s' %(name)
+            pid = self.shell_cmd(cmd)
+            pid = pid.rstrip('\n')
+            self.shell_cmd('mkdir -p /var/run/netns')
+            self.shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' %(pid,name))
+            vm = ConfigVM()
+            vm_name = '%s-%s' % (socket.gethostname(), name)
+            try:
+                vm_obj = vm.read(vm_name)
+            except:
+                vm_obj = vm.create(vm_name)
+
+            veth = self.get_vethid(name)
+
+
+        def get_vethid(self,name):
+            cmd = "ip netns exec %s ip link | grep veth | \
+            awk '{print $2}' | awk -F ':' '{print $1}' | \
+            awk -F 'veth' '{print $2}' | tail -n 1" %(name)
+
+            veth = self.shell_cmd(cmd)
+            if veth:
+                return int(veth) + 1024
+            else:
+                return 1024
+
+            
+
