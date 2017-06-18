@@ -64,7 +64,7 @@ class ConfigTenant(ConfigHandle):
         try:
             self.vnc_handle.project_create(obj)
         except:
-            print "ERROR: Failed to delete the project {}".format(name)
+            print "ERROR: Failed to create the project {}".format(name)
 
     def delete(self,name):
         domain = self.vnc_handle.domain_read(fq_name = ['default-domain'])
