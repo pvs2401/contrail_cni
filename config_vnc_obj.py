@@ -3,10 +3,11 @@ from vnc_api import vnc_api
 from requests.exceptions import ConnectionError
 from cfgm_common import exceptions as vnc_exc
 from random import randint
+from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
 import socket
+import subprocess
 import sys
 import json
-import pdb
 import uuid
 
 class ConfigHandle(object):
@@ -27,31 +28,53 @@ class ConfigHandle(object):
             sys.exit(1)
 
     def get_project(self,name=None):
-        if not name:
-            tenant = self.tenant
+        tenant = name and name or self.tenant
         fq_name = fq_name = ['default-domain', tenant]
         return self.vnc_handle.project_read(fq_name=fq_name)
 
     @staticmethod
-    def fqn_to_string(self,fq_name):
+    def fqn_to_string(fq_name):
         return ':'.join(fq_name)
 
     @staticmethod
-    def string_to_fqn(self,name):
+    def string_to_fqn(name):
         return name.split(':')
 
     @staticmethod
     def get_subnet():
         return "100.64.{}.0/24".format(randint(1,254))
     
-    @staticmethod
-    def print_json(obj=None):
+    def print_json(self,obj=None):
          print json.dumps(obj, default = self.vnc_handle._obj_serializer_all,indent=4, separators=(',', ': '))
     
     @staticmethod
     def shell_cmd(cmd):
         return subprocess.check_output(cmd, shell = True)
 
+class ConfigTenant(ConfigHandle):
+    def __init__(self,*args,**kwargs):
+        if self.vnc_handle:
+            pass
+        else: 
+            super(ConfigTenant,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
+    
+    def create(self,name):
+        domain = self.vnc_handle.domain_read(fq_name = ['default-domain'])
+        obj = vnc_api.Project(name = name, parent_obj = domain)
+        try:
+            self.vnc_handle.project_create(obj)
+        except:
+            print "ERROR: Failed to delete the project {}".format(name)
+
+    def delete(self,name):
+        domain = self.vnc_handle.domain_read(fq_name = ['default-domain'])
+        proj = self.get_project(name)
+        if not proj:
+            return
+        try:
+            self.vnc_handle.project_delete(id=proj.uuid)
+        except:
+            print "ERROR: Failed to delete the project {}".format(name)
 
 class ConfigVN(ConfigHandle):
     def __init__(self,*args,**kwargs):
@@ -100,8 +123,15 @@ class ConfigVN(ConfigHandle):
             print "Virtual Network  [{}] not found".format(self.fqn_to_string(fq_name))
             raise
 
+    @property
+    def uuid(self,name):
+        return self.read(name).uuid
+
     def show(self,name):
         self.print_json(self.read(name))
+
+    def list(self):
+        raise NotImplementedError
 
     def add_ipam(self,name='default-network-ipam',tenant='default-project',subnet=None):
         fq_name = [self.domain,tenant,name]
@@ -153,23 +183,30 @@ class ConfigVM(ConfigHandle):
 
     def delete_vmis(self,name=None):
         vm_obj = self.read(name)
-        for p in vm_obj.get_virtual_machine_interface_back_refs():
-            vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
-            if vmi_obj.get_instance_ip_back_refs():
-                for p in vmi_obj.get_instance_ip_back_refs():
-                    iip_obj = self.vnc_handle.instance_ip_read(fq_name = p['to'])
-                    fq_name = iip_obj.get_fq_name()
-                    self.vnc_handle.instance_ip_delete(fq_name=fq_name)
-            fq_name = vmi_obj.get_fq_name()
-            self.vnc_handle.virtual_machine_interface_delete(fq_name=fq_name)
+        try:
+            for p in vm_obj.get_virtual_machine_interface_back_refs():
+                vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
+                if vmi_obj.get_instance_ip_back_refs():
+                    for p in vmi_obj.get_instance_ip_back_refs():
+                        iip_obj = self.vnc_handle.instance_ip_read(fq_name = p['to'])
+                        fq_name = iip_obj.get_fq_name()
+                        self.vnc_handle.instance_ip_delete(fq_name=fq_name)
+                fq_name = vmi_obj.get_fq_name()
+                self.vnc_handle.virtual_machine_interface_delete(fq_name=fq_name)
+            return
+        except TypeError:
+            return
 
     def read(self,name):
         fq_name = [ name ]
         try:
             return self.vnc_handle.virtual_machine_read(fq_name=fq_name)
         except vnc_exc.NoIdError:
-            print "Error Virtual Machine  [{}] not found".format(self.fqn_to_string(fq_name))
-            raise
+            print "Virtual Machine  [{}] not found".format(self.fqn_to_string(fq_name))
+            sys.exit(1)
+    @property
+    def uuid(self,name):
+        return self.read(name).uuid
 
     def show(self,name):
         self.print_json(self.read(name))
@@ -241,8 +278,11 @@ class ConfigVMI(ConfigHandle):
         try:
             return self.vnc_handle.virtual_machine_interface_read(fq_name=fq_name)
         except vnc_exc.NoIdError:
-            print "Error Virtual Machine  Interface [{}] not found".format(self.fqn_to_string(fq_name))
+            print "Virtual Machine  Interface [{}] not found".format(self.fqn_to_string(fq_name))
             raise
+    @property
+    def uuid(self,name):
+        return self.read(name).uuid
 
     def delete_iip(self,name=None):
         vmi_obj = self.read(name)
@@ -253,39 +293,111 @@ class ConfigVMI(ConfigHandle):
                 self.vnc_handle.instance_ip_delete(fq_name=fq_name)
         return
 
-    class ConfigCNI(ConfigHandle):
-        def __init__(self):
+    @property
+    def mac(self,name=None):
+        vmi_obj = self.read(name)
+        return vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
+
+class ConfigCNI(ConfigHandle):
+    def __init__(self,**kwargs):
         if self.vnc_handle:
             pass
         else: 
-            super(ConfigVMI,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
-        
-        def add_cni(self,name,vn_name):
-            cmd = 'docker inspect -f "{{.State.Pid}}" %s' %(name)
-            pid = self.shell_cmd(cmd)
-            pid = pid.rstrip('\n')
-            self.shell_cmd('mkdir -p /var/run/netns')
-            self.shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' %(pid,name))
-            vm = ConfigVM()
-            vm_name = '%s-%s' % (socket.gethostname(), name)
-            try:
-                vm_obj = vm.read(vm_name)
-            except:
-                vm_obj = vm.create(vm_name)
+            super(ConfigCNI,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
 
-            veth = self.get_vethid(name)
+        self.vmi = ConfigVMI()
+        self.vm = ConfigVM()
+        self.vn = ConfigVN()
+        self.vrouter = ContrailVRouterApi()
+    
+    def create(self,name,vn):
+        self.name = name
+        cmd = 'docker inspect -f "{{.State.Pid}}" %s' %(name)
+        pid = self.shell_cmd(cmd)
+        pid = pid.rstrip('\n')
+        self.shell_cmd('mkdir -p /var/run/netns')
+        self.shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' %(pid,name))
+        vm_name = '%s-%s' % (socket.gethostname(), name)
+        try:
+            vm_obj = self.vm.read(vm_name)
+        except:
+            self.vm.create(vm_name)
+        vm_obj = self.vm.read(vm_name)
+        ifl = self.get_vethid(name)
+        ifl = 1024 if not ifl else int(ifl)+1
+        (veth,cni) = ("veth-{}".format(str(ifl)),"cni-{}".format(str(ifl)))
+        try:
+            vmi_obj = self.vmi.read(cni)
+        except:
+            self.vmi.create(vn,vm_name,cni)
+            vmi_obj = self.vmi.read(cni)
 
+        if vmi_obj:
+            mac = vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
+            self.shell_cmd('sudo ip link add %s type veth peer name %s' \
+                               %(cni,veth))
+            self.shell_cmd('sudo ifconfig %s hw ether %s'\
+                               %(veth,mac))
+            self.shell_cmd('sudo ip link set %s netns %s' \
+                               %(veth, name))
+            self.shell_cmd('sudo ip netns exec %s ip link set %s up' \
+                               %(name,veth))
+            self.shell_cmd('sudo ip link set %s up' \
+                               %(cni))
+        self.register_cni(name,cni,vm_obj,vmi_obj)
 
-        def get_vethid(self,name):
-            cmd = "ip netns exec %s ip link | grep veth | \
-            awk '{print $2}' | awk -F ':' '{print $1}' | \
-            awk -F 'veth' '{print $2}' | tail -n 1" %(name)
+    def delete(self,name):
+        vm_name = '%s-%s' % (socket.gethostname(), name)
+        ifl = self.get_vethid(name)
+        if ifl:
+            cni = "cni-{}".format(str(ifl))
+        else:
+            print "No more interfaces are left inside the container instance"
+            print "Deleting the VM object"
+            self.vm.delete(vm_name)
+            sys.exit(1)
+        vmi_obj = self.vmi.read(cni)
+        self.unregister_cni(vmi_obj)
+        self.vmi.delete(cni)
+        self.shell_cmd('sudo ip link delete %s' \
+                       %(cni))
+        return
 
-            veth = self.shell_cmd(cmd)
-            if veth:
-                return int(veth) + 1024
-            else:
-                return 1024
+    def list(self,name):
+        import re
+        from operator import attrgetter,itemgetter
+        vm_name = '%s-%s' % (socket.gethostname(), name)
+        vm_obj = self.vm.read(vm_name)
+        vm_name = vm_obj.display_name
+        try:
+            print "{:24}{:24}{:24}{:24}".\
+                    format('Docker Instance','Container Interface',\
+                         'Vrouter interface','Network Segment')
+            vmi_objs = vm_obj.get_virtual_machine_interface_back_refs()
+            vmi_objs.sort(key= lambda vmi:vmi['to'][2])
 
-            
+            for p in vmi_objs:
+                vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
+                cni_name = vmi_obj.display_name
+                veth_name = re.sub(r'cni','veth',cni_name)
+                vn_name = vmi_obj.virtual_network_refs[0]['to'][2]
+                print "{:24}{:24}{:24}{:24}".format(name,veth_name,cni_name,vn_name)
+        except:
+            return
+        return
 
+    def register_cni(self,name,cni,vm_obj,vmi_obj):
+        mac = vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
+        self.vrouter.add_port(vm_obj.uuid, vmi_obj.uuid, cni, mac, port_type='NovaVMPort')
+        return
+
+    def unregister_cni(self,vmi_obj):
+        self.vrouter.delete_port(vmi_obj.uuid)
+        return
+    
+    def get_vethid(self,name):
+        cmd = "ip netns exec %s ip link | grep veth | \
+        awk '{print $2}' | awk -F ':' '{print $1}' | \
+        awk -F 'veth-' '{print $2}' | tail -n 1" %(name)
+        ifl = self.shell_cmd(cmd)
+        return ifl.rstrip('\n')
