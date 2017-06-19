@@ -317,7 +317,7 @@ class ConfigCNI(ConfigHandle):
         pid = pid.rstrip('\n')
         self.shell_cmd('mkdir -p /var/run/netns')
         self.shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' %(pid,name))
-        vm_name = '%s-%s' % (socket.gethostname(), name)
+        vm_name = '{}-{}'.format(socket.gethostname(),name)
         try:
             vm_obj = self.vm.read(vm_name)
         except:
@@ -326,11 +326,12 @@ class ConfigCNI(ConfigHandle):
         ifl = self.get_vethid(name)
         ifl = 1024 if not ifl else int(ifl)+1
         (veth,cni) = ("veth-{}".format(str(ifl)),"cni-{}".format(str(ifl)))
+        vmi_name = '{}-{}'.format(socket.gethostname(),ifl)
         try:
-            vmi_obj = self.vmi.read(cni)
+            vmi_obj = self.vmi.read(vmi_name)
         except:
-            self.vmi.create(vn,vm_name,cni)
-            vmi_obj = self.vmi.read(cni)
+            self.vmi.create(vn,vm_name,vmi_name)
+            vmi_obj = self.vmi.read(vmi_name)
 
         if vmi_obj:
             mac = vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
@@ -344,23 +345,25 @@ class ConfigCNI(ConfigHandle):
                                %(name,veth))
             self.shell_cmd('sudo ip link set %s up' \
                                %(cni))
-        self.register_cni(name,cni,vm_obj,vmi_obj)
+        self.register_cni(cni,vm_obj,vmi_obj)
 
     def delete(self,name):
         vm_name = '%s-%s' % (socket.gethostname(), name)
         ifl = self.get_vethid(name)
+        vmi_name = '{}-{}'.format(socket.gethostname(),ifl)
         if ifl:
             cni = "cni-{}".format(str(ifl))
         else:
             print "No more interfaces are left inside the container instance"
-            print "Deleting the VM object"
-            self.vm.delete(vm_name)
             sys.exit(1)
-        vmi_obj = self.vmi.read(cni)
+        vmi_obj = self.vmi.read(vmi_name)
         self.unregister_cni(vmi_obj)
-        self.vmi.delete(cni)
+        self.vmi.delete(vmi_name)
         self.shell_cmd('sudo ip link delete %s' \
                        %(cni))
+        if int(ifl) == 1024:
+            print "Deleting the VM object"
+            self.vm.delete(vm_name)
         return
 
     def list(self,name):
@@ -370,23 +373,26 @@ class ConfigCNI(ConfigHandle):
         vm_obj = self.vm.read(vm_name)
         vm_name = vm_obj.display_name
         try:
-            print "{:24}{:24}{:24}{:24}".\
-                    format('Docker Instance','Container Interface',\
-                         'Vrouter interface','Network Segment')
+            print "{:24}{:24}{:24}{:32}{:24}".\
+                    format('Docker Instance','Vrouter Interface',\
+                         'Container interface','Virtual Machine Interface','Network Segment')
+            print "-"*124
             vmi_objs = vm_obj.get_virtual_machine_interface_back_refs()
             vmi_objs.sort(key= lambda vmi:vmi['to'][2])
 
             for p in vmi_objs:
                 vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
-                cni_name = vmi_obj.display_name
-                veth_name = re.sub(r'cni','veth',cni_name)
+                vmi_name = vmi_obj.display_name
+                ifl = re.search(r'-([0-9]+)$',vmi_name).group(1)
+                cni_name = 'cni-{}'.format(ifl)
+                veth_name = 'veth-{}'.format(ifl)
                 vn_name = vmi_obj.virtual_network_refs[0]['to'][2]
-                print "{:24}{:24}{:24}{:24}".format(name,veth_name,cni_name,vn_name)
+                print "{:24}{:24}{:24}{:32}{:24}".format(name,veth_name,cni_name,vmi_name,vn_name)
         except:
             return
         return
 
-    def register_cni(self,name,cni,vm_obj,vmi_obj):
+    def register_cni(self,cni,vm_obj,vmi_obj):
         mac = vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
         self.vrouter.add_port(vm_obj.uuid, vmi_obj.uuid, cni, mac, port_type='NovaVMPort')
         return
