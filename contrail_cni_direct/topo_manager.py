@@ -76,6 +76,9 @@ class ParseArgs:
         config_obj_oper = getattr(config_obj_handle,arg_list.pop('obj_func'))
         config_obj_oper(**arg_list)
 
-if __name__ == '__main__':
+def main():
     var1 = ParseArgs()
     var1.parse_args()
+
+if __name__ == '__main__':
+    main()
