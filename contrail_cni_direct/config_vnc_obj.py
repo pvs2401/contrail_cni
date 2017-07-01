@@ -386,8 +386,8 @@ class ConfigCNI(ConfigHandle):
                 vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
                 vmi_name = vmi_obj.display_name
                 ifl = re.search(r'-([0-9]+)$',vmi_name).group(1)
-                cni_name = 'cni-{}'.format(ifl)
-                veth_name = 'veth-{}'.format(ifl)
+                cni_name = 'cni-{}-{}'.format(name,ifl)
+                veth_name = 'veth-{}-{}'.format(name,ifl)
                 vn_name = vmi_obj.virtual_network_refs[0]['to'][2]
                 print "{:24}{:24}{:24}{:32}{:24}".format(name,veth_name,cni_name,vmi_name,vn_name)
         except:
