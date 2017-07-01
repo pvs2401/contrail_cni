@@ -9,6 +9,7 @@ import subprocess
 import sys
 import json
 import uuid
+import pdb
 
 class ConfigHandle(object):
     vnc_handle  = None
@@ -325,8 +326,9 @@ class ConfigCNI(ConfigHandle):
         vm_obj = self.vm.read(vm_name)
         ifl = self.get_vethid(name)
         ifl = 1024 if not ifl else int(ifl)+1
-        (veth,cni) = ("veth-{}".format(str(ifl)),"cni-{}".format(str(ifl)))
-        vmi_name = '{}-{}'.format(socket.gethostname(),ifl)
+        (veth,cni) = ("veth-{}-{}".format(name,str(ifl)),\
+                      "cni-{}-{}".format(name,str(ifl)))
+        vmi_name = "{}-{}-{}".format(socket.gethostname(),name,ifl)
         try:
             vmi_obj = self.vmi.read(vmi_name)
         except:
@@ -350,9 +352,9 @@ class ConfigCNI(ConfigHandle):
     def delete(self,name):
         vm_name = '%s-%s' % (socket.gethostname(), name)
         ifl = self.get_vethid(name)
-        vmi_name = '{}-{}'.format(socket.gethostname(),ifl)
+        vmi_name = '{}-{}-{}'.format(socket.gethostname(),name,ifl)
         if ifl:
-            cni = "cni-{}".format(str(ifl))
+            cni = "cni-{}-{}".format(name,str(ifl))
         else:
             print "No more interfaces are left inside the container instance"
             sys.exit(1)
@@ -404,6 +406,6 @@ class ConfigCNI(ConfigHandle):
     def get_vethid(self,name):
         cmd = "ip netns exec %s ip link | grep veth | \
         awk '{print $2}' | awk -F ':' '{print $1}' | \
-        awk -F 'veth-' '{print $2}' | tail -n 1" %(name)
+        awk -F 'veth-%s-' '{print $2}' | tail -n 1" %(name,name)
         ifl = self.shell_cmd(cmd)
         return ifl.rstrip('\n')

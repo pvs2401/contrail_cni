@@ -14,7 +14,7 @@ setuptools.setup(
     name='contrail-cni-direct',
     version='1.0',
     packages=setuptools.find_packages(),
-
+    include_package_data=True,
     # metadata
     author="OpenContrail",
     author_email="dev@lists.opencontrail.org",
