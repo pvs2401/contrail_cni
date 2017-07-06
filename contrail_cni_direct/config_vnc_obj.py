@@ -325,7 +325,7 @@ class ConfigCNI(ConfigHandle):
             self.vm.create(vm_name)
         vm_obj = self.vm.read(vm_name)
         ifl = self.get_vethid(name)
-        ifl = 1024 if not ifl else int(ifl)+1
+        ifl = 1 if not ifl else int(ifl)+1
         (veth,cni) = ("veth-{}-{}".format(name,str(ifl)),\
                       "cni-{}-{}".format(name,str(ifl)))
         vmi_name = "{}-{}-{}".format(socket.gethostname(),name,ifl)
@@ -363,7 +363,7 @@ class ConfigCNI(ConfigHandle):
         self.vmi.delete(vmi_name)
         self.shell_cmd('sudo ip link delete %s' \
                        %(cni))
-        if int(ifl) == 1024:
+        if int(ifl) == 1:
             print "Deleting the VM object"
             self.vm.delete(vm_name)
         return
