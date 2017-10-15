@@ -157,7 +157,7 @@ class ConfigVM(ConfigHandle):
             super(ConfigVM,self).__init__( api_server_host=kwargs['api_server'], tenant=kwargs['tenant'])
 
     def create(self, name):
-        fq_name = [ name ]
+        fq_name = [self.domain,self.tenant, name ]
         try:
             vm_obj = self.vnc_handle.virtual_machine_read(fq_name = fq_name)
             print "Virtual Machine exists"
@@ -173,7 +173,7 @@ class ConfigVM(ConfigHandle):
                 raise
 
     def delete(self,name):
-        fq_name = [ name ]
+        fq_name = [self.domain,self.tenant, name ]
         try:
             self.delete_vmis(name)
             self.vnc_handle.virtual_machine_delete(fq_name = fq_name)
@@ -183,7 +183,7 @@ class ConfigVM(ConfigHandle):
             raise
 
     def delete_vmis(self,name=None):
-        vm_obj = self.read(name)
+        fq_name = [self.domain,self.tenant, name ]
         try:
             for p in vm_obj.get_virtual_machine_interface_back_refs():
                 vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
@@ -319,6 +319,8 @@ class ConfigCNI(ConfigHandle):
         self.shell_cmd('mkdir -p /var/run/netns')
         self.shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' %(pid,name))
         vm_name = '{}-{}'.format(socket.gethostname(),name)
+        proj_obj = self.get_project(name=self.tenant)
+	vn_obj = self.vn.read(name=vn)
         try:
             vm_obj = self.vm.read(vm_name)
         except:
@@ -347,7 +349,7 @@ class ConfigCNI(ConfigHandle):
                                %(name,veth))
             self.shell_cmd('sudo ip link set %s up' \
                                %(cni))
-        self.register_cni(cni,vm_obj,vmi_obj)
+        self.register_cni(cni,vm_obj,vmi_obj,vn_obj,proj_obj)
 
     def delete(self,name):
         vm_name = '%s-%s' % (socket.gethostname(), name)
@@ -394,9 +396,9 @@ class ConfigCNI(ConfigHandle):
             return
         return
 
-    def register_cni(self,cni,vm_obj,vmi_obj):
+    def register_cni(self,cni,vm_obj,vmi_obj,vn_obj,proj_obj):
         mac = vmi_obj.virtual_machine_interface_mac_addresses.mac_address[0]
-        self.vrouter.add_port(vm_obj.uuid, vmi_obj.uuid, cni, mac, port_type='NovaVMPort')
+        self.vrouter.add_port(vm_obj.uuid, vmi_obj.uuid, cni, mac, port_type='NovaVMPort',vm_project_id=proj_obj.uuid, vn_id=vn_obj.uuid)
         return
 
     def unregister_cni(self,vmi_obj):
@@ -406,6 +408,7 @@ class ConfigCNI(ConfigHandle):
     def get_vethid(self,name):
         cmd = "ip netns exec %s ip link | grep veth | \
         awk '{print $2}' | awk -F ':' '{print $1}' | \
-        awk -F 'veth-%s-' '{print $2}' | tail -n 1" %(name,name)
+        awk -F 'veth-%s-' '{print $2}' | tail -n 1 | \
+        awk -F '@' {'print $1}'" %(name,name)
         ifl = self.shell_cmd(cmd)
         return ifl.rstrip('\n')
