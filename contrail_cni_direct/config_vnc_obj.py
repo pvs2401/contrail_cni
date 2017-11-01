@@ -176,7 +176,6 @@ class ConfigVM(ConfigHandle):
         fq_name = [self.domain,self.tenant, name ]
         try:
             self.delete_vmis(name)
-            self.vnc_handle.virtual_machine_delete(fq_name = fq_name)
             print "Deleted the virtual machine [{}]".format(self.fqn_to_string(fq_name))
         except vnc_exc.NoIdError:
             print "Virtual Machine  [{}] not found".format(self.fqn_to_string(fq_name))
@@ -184,6 +183,7 @@ class ConfigVM(ConfigHandle):
 
     def delete_vmis(self,name=None):
         fq_name = [self.domain,self.tenant, name ]
+        vm_obj = vnc_api.VirtualMachine(name = name)
         try:
             for p in vm_obj.get_virtual_machine_interface_back_refs():
                 vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
@@ -328,7 +328,7 @@ class ConfigCNI(ConfigHandle):
         vm_obj = self.vm.read(vm_name)
         ifl = self.get_vethid(name)
         ifl = 1 if not ifl else int(ifl)+1
-        (veth,cni) = ("veth-{}-{}".format(name,str(ifl)),\
+        (veth,cni) = ("eth{}".format(str(ifl)),\
                       "cni-{}-{}".format(name,str(ifl)))
         vmi_name = "{}-{}-{}".format(socket.gethostname(),name,ifl)
         try:
@@ -389,9 +389,9 @@ class ConfigCNI(ConfigHandle):
                 vmi_name = vmi_obj.display_name
                 ifl = re.search(r'-([0-9]+)$',vmi_name).group(1)
                 cni_name = 'cni-{}-{}'.format(name,ifl)
-                veth_name = 'veth-{}-{}'.format(name,ifl)
+                veth_name = 'eth{}'.format(ifl)
                 vn_name = vmi_obj.virtual_network_refs[0]['to'][2]
-                print "{:24}{:24}{:24}{:32}{:24}".format(name,veth_name,cni_name,vmi_name,vn_name)
+                print "{:24}{:24}{:24}{:32}{:24}".format(name,cni_name,veth_name,vmi_name,vn_name)
         except:
             return
         return
@@ -406,9 +406,9 @@ class ConfigCNI(ConfigHandle):
         return
     
     def get_vethid(self,name):
-        cmd = "ip netns exec %s ip link | grep veth | \
+        cmd = "ip netns exec %s ip link | \
         awk '{print $2}' | awk -F ':' '{print $1}' | \
-        awk -F 'veth-%s-' '{print $2}' | tail -n 1 | \
-        awk -F '@' {'print $1}'" %(name,name)
+        grep eth | awk -F 'eth' '{print $2}' | tail -n 1 | \
+        awk -F '@' {'print $1}'" %(name)
         ifl = self.shell_cmd(cmd)
         return ifl.rstrip('\n')
