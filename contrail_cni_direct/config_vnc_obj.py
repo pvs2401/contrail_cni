@@ -352,22 +352,36 @@ class ConfigCNI(ConfigHandle):
         self.register_cni(cni,vm_obj,vmi_obj,vn_obj,proj_obj)
 
     def delete(self,name):
+        import re
         vm_name = '%s-%s' % (socket.gethostname(), name)
-        ifl = self.get_vethid(name)
-        vmi_name = '{}-{}-{}'.format(socket.gethostname(),name,ifl)
-        if ifl:
-            cni = "cni-{}-{}".format(name,str(ifl))
-        else:
-            print "No more interfaces are left inside the container instance"
-            sys.exit(1)
-        vmi_obj = self.vmi.read(vmi_name)
-        self.unregister_cni(vmi_obj)
-        self.vmi.delete(vmi_name)
-        self.shell_cmd('sudo ip link delete %s' \
+        vm_obj = self.vm.read(vm_name)
+        vm_name = vm_obj.display_name
+        try:
+            vmi_objs = vm_obj.get_virtual_machine_interface_back_refs()
+            vmi_objs.sort(key= lambda vmi:vmi['to'][2])
+
+            for p in vmi_objs:
+                vmi_obj = self.vnc_handle.virtual_machine_interface_read(fq_name = p['to'])
+                vmi_name = vmi_obj.display_name
+                ifl = re.search(r'-([0-9]+)$',vmi_name).group(1)
+                cni_name = 'cni-{}-{}'.format(name,ifl)
+                veth_name = 'eth{}'.format(ifl)
+                vn_name = vmi_obj.virtual_network_refs[0]['to'][2]
+                print "deleting {}".format(vmi_name)
+                self.unregister_cni(vmi_obj)
+                self.vmi.delete(vmi_name)
+                try:
+                   self.shell_cmd('sudo ip link delete %s' \
                        %(cni))
-        if int(ifl) == 1:
-            print "Deleting the VM object"
-            self.vm.delete(vm_name)
+                except:
+                   pass
+                if int(ifl) == 1:
+                       print "Deleting the VM object"
+                       self.vm.delete(vm_name)
+        except:
+            print "delete failed"
+            return
+
         return
 
     def list(self,name):
